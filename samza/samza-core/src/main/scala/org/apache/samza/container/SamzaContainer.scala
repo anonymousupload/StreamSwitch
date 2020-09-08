@@ -793,6 +793,7 @@ class SamzaContainer(
   def run {
     try {
       info("Starting container.")
+      metrics.isRunning.set(false);
 
       if (containerListener != null) {
         containerListener.beforeStart()
@@ -805,7 +806,6 @@ class SamzaContainer(
       }
       applicationContainerContextOption.foreach(_.start)
 
-      startMetrics
       startDiagnostics
       startAdmins
       startOffsetManager
@@ -818,6 +818,7 @@ class SamzaContainer(
       startTask
       startConsumers
       startSecurityManger
+      startMetrics
 
       addShutdownHook
       info("Entering run loop.")
@@ -826,6 +827,7 @@ class SamzaContainer(
         containerListener.afterStart()
       }
       metrics.containerStartupTime.update(System.nanoTime() - startTime)
+      metrics.isRunning.set(true)
       runLoop.run
     } catch {
       case e: Throwable =>
@@ -862,7 +864,7 @@ class SamzaContainer(
       if (!status.equals(SamzaContainerStatus.FAILED)) {
         status = SamzaContainerStatus.STOPPED
       }
-
+      metrics.isRunning.set(false)
       info("Shutdown complete.")
     } catch {
       case e: Throwable =>

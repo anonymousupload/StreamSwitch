@@ -64,6 +64,7 @@ import org.apache.flink.runtime.jobmanager.scheduler.NoResourceAvailableExceptio
 import org.apache.flink.runtime.jobmaster.slotpool.Scheduler;
 import org.apache.flink.runtime.jobmaster.slotpool.SlotProvider;
 import org.apache.flink.runtime.query.KvStateLocationRegistry;
+import org.apache.flink.runtime.rescale.JobRescaleCoordinator;
 import org.apache.flink.runtime.state.SharedStateRegistry;
 import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.taskmanager.TaskExecutionState;
@@ -75,13 +76,11 @@ import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SerializedThrowable;
 import org.apache.flink.util.SerializedValue;
 import org.apache.flink.util.StringUtils;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
@@ -301,6 +300,8 @@ public class ExecutionGraph implements AccessExecutionGraph {
 	// ------ Fields that are only relevant for archived execution graphs ------------
 	private String jsonPlan;
 
+
+	private JobRescaleCoordinator jobRescaleCoordinator;
 	// --------------------------------------------------------------------------------------------
 	//   Constructors
 	// --------------------------------------------------------------------------------------------
@@ -662,6 +663,10 @@ public class ExecutionGraph implements AccessExecutionGraph {
 		return this.userClassLoader;
 	}
 
+	public Time getRpcTimeout() {
+		return this.rpcTimeout;
+	}
+
 	@Override
 	public JobStatus getState() {
 		return state;
@@ -883,6 +888,15 @@ public class ExecutionGraph implements AccessExecutionGraph {
 		failoverStrategy.notifyNewVertices(newExecJobVertices);
 	}
 
+	public void updateNumOfTotalVertices() {
+		int totalVertices = 0;
+		for (ExecutionJobVertex ejv : tasks.values()) {
+			totalVertices += ejv.getParallelism();
+		}
+
+		this.numVerticesTotal = totalVertices;
+	}
+
 	public void scheduleForExecution() throws JobException {
 
 		assertRunningInJobMasterMainThread();
@@ -997,6 +1011,14 @@ public class ExecutionGraph implements AccessExecutionGraph {
 								String.format("Could not deploy execution %s.", execution),
 								t));
 					}
+				}
+
+				// notify jobRescaleCoordinator to fail current scaling action
+				if (jobRescaleCoordinator != null) {
+					LOG.info("++++++ notify job rescale coordinator redo");
+					this.jobRescaleCoordinator.notifyFailure();
+				} else {
+					LOG.info("++++++ no job rescale coordinator");
 				}
 			})
 			// Generate a more specific failure message for the eager scheduling
@@ -1391,7 +1413,7 @@ public class ExecutionGraph implements AccessExecutionGraph {
 	 * and is used to disambiguate concurrent modifications between local and global
 	 * failover actions.
 	 */
-	long getGlobalModVersion() {
+	public long getGlobalModVersion() {
 		return globalModVersion;
 	}
 
@@ -1850,5 +1872,9 @@ public class ExecutionGraph implements AccessExecutionGraph {
 		if (!(jobMasterMainThreadExecutor instanceof ComponentMainThreadExecutor.DummyComponentMainThreadExecutor)) {
 			jobMasterMainThreadExecutor.assertRunningInMainThread();
 		}
+	}
+
+	public void setJobRescaleCoordinator(JobRescaleCoordinator jobRescaleCoordinator) {
+		this.jobRescaleCoordinator = jobRescaleCoordinator;
 	}
 }
